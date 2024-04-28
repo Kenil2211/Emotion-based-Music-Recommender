@@ -14,6 +14,9 @@ from threading import Thread
 # from Spotipy import *  
 import time
 import pandas as pd
+from pymongo import MongoClient
+import requests 
+
 face_cascade=cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
 ds_factor=0.6
 
@@ -101,39 +104,68 @@ class WebcamVideoStream:
 			self.stopped = True
 
 ''' Class for reading video stream, generating prediction and recommendations '''
-class VideoCamera(object):
-	
-	def get_frame(self):
-		global cap1
-		global df1
-		cap1 = WebcamVideoStream(src=0).start()
-		image = cap1.read()
-		image=cv2.resize(image,(600,500))
-		gray=cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
-		face_rects=face_cascade.detectMultiScale(gray,1.3,5)
-		df1 = pd.read_csv(music_dist[show_text[0]])
-		df1 = df1[['Name','Album','Artist','url']]
-		df1 = df1.head(15)
-		for (x,y,w,h) in face_rects:
-			cv2.rectangle(image,(x,y-50),(x+w,y+h+10),(0,255,0),2)
-			roi_gray_frame = gray[y:y + h, x:x + w]
-			cropped_img = np.expand_dims(np.expand_dims(cv2.resize(roi_gray_frame, (48, 48)), -1), 0)
-			prediction = emotion_model.predict(cropped_img)
+client = MongoClient('mongodb://localhost:27017')
+db = client.club5
+emotions_collection = db.emotions
 
-			maxindex = int(np.argmax(prediction))
-			show_text[0] = maxindex 
-			#print("===========================================",music_dist[show_text[0]],"===========================================")
-			#print(df1)
-			cv2.putText(image, emotion_dict[maxindex], (x+20, y-60), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
-			df1 = music_rec()
-			
-		global last_frame1
-		last_frame1 = image.copy()
-		pic = cv2.cvtColor(last_frame1, cv2.COLOR_BGR2RGB)     
-		img = Image.fromarray(last_frame1)
-		img = np.array(img)
-		ret, jpeg = cv2.imencode('.jpg', img)
-		return jpeg.tobytes(), df1
+class VideoCamera(object):
+    
+    def __init__(self, userid):
+        self.userid = userid
+        
+    def get_frame(self):
+        global cap1
+        global df1
+        cap1 = WebcamVideoStream(src=0).start()
+        image = cap1.read()
+        image=cv2.resize(image,(600,500))
+        gray=cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
+        face_rects=face_cascade.detectMultiScale(gray,1.3,5)
+        df1 = pd.read_csv(music_dist[show_text[0]])
+        df1 = df1[['Name','Album','Artist','url']]
+        df1 = df1.head(15)
+        
+        
+        
+        # userid = localStorage.getItem('username')
+        
+        for (x,y,w,h) in face_rects:
+            cv2.rectangle(image,(x,y-50),(x+w,y+h+10),(0,255,0),2)
+            roi_gray_frame = gray[y:y + h, x:x + w]
+            cropped_img = np.expand_dims(np.expand_dims(cv2.resize(roi_gray_frame, (48, 48)), -1), 0)
+            prediction = emotion_model.predict(cropped_img)
+
+            maxindex = int(np.argmax(prediction))
+            show_text[0] = maxindex 
+            
+            current_time = datetime.datetime.now()
+            emotion_data = {
+                "emotion": emotion_dict[maxindex],
+                "date_time": current_time,
+                "userid": self.userid
+            }
+            emotions_collection.insert_one(emotion_data)
+            
+            # # Make a POST request to store the emotion data in the database
+            # response = requests.post('http://localhost:5000/store_emotion', json=emotion_data)
+            # if response.status_code == 200:
+            #     print("Emotion stored successfully")
+            # else:
+            #     print("Failed to store emotion:", response.text)
+            
+            
+            cv2.putText(image, emotion_dict[maxindex], (x+20, y-60), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+            df1 = music_rec()
+            
+        global last_frame1
+        last_frame1 = image.copy()
+        pic = cv2.cvtColor(last_frame1, cv2.COLOR_BGR2RGB)     
+        img = Image.fromarray(last_frame1)
+        img = np.array(img)
+        ret, jpeg = cv2.imencode('.jpg', img)
+        return jpeg.tobytes(), df1
+
+
 
 def music_rec():
 	# print('---------------- Value ------------', music_dist[show_text[0]])
